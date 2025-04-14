@@ -1,1 +1,62 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from statsmodels.tsa.arima.model import ARIMA
+from scipy.special import expit, logit
+
+# 1. Load mortality data
+# Replace with your path to the downloaded CSV file from HMD
+us_mortality = pd.read_csv("USA_mx_1x1.csv")
+
+# 2. Filter for male mortality rates
+us_mortality = us_mortality[us_mortality['Sex'] == 'Male']
+
+# 3. Pivot the table to get age x year matrix
+mortality_matrix = us_mortality.pivot(index='Age', columns='Year', values='mx')
+
+# 4. Limit to ages 55 to 110
+ages_fit = np.arange(55, 111)
+mortality_matrix = mortality_matrix.loc[ages_fit]
+
+# 5. Fit CBD model (Lee-Carter-like: log(mx) = ax + bx * kt)
+log_mx = np.log(mortality_matrix)
+ax = log_mx.mean(axis=1)
+kt = log_mx.sub(ax, axis=0).mean()
+bx = log_mx.sub(ax, axis=0).sub(kt, axis=1).mean(axis=1)
+
+# 6. Forecast kt using ARIMA
+model_kt = ARIMA(kt, order=(1,1,2)).fit()
+kt_forecast = model_kt.forecast(steps=60)
+
+# 7. Forecast mortality rates (CBD)
+forecast_years = range(mortality_matrix.columns[-1] + 1, mortality_matrix.columns[-1] + 61)
+CBD_rates = pd.DataFrame(index=ages_fit, columns=forecast_years)
+for i, year in enumerate(forecast_years):
+    CBD_rates[year] = np.exp(ax + bx * kt_forecast[i])
+
+# 8. Convert to survival probabilities
+CBD55 = pd.DataFrame(index=ages_fit)
+CBD55['qx'] = CBD_rates.loc[:, forecast_years[:len(ages_fit)]].values.diagonal()
+CBD55['px'] = 1 - CBD55['qx']
+
+# 9. RH model (logit qx = ax + bx * kt + gamma_c)
+# Approximate using logit transform and similar ARIMA on transformed qx
+logit_qx = logit(mortality_matrix.clip(0.00001, 0.99999))  # Avoid infs
+ax_rh = logit_qx.mean(axis=1)
+kt_rh = logit_qx.sub(ax_rh, axis=0).mean()
+
+model_kt_rh = ARIMA(kt_rh, order=(1,1,2)).fit()
+kt_forecast_rh = model_kt_rh.forecast(steps=60)
+
+RH_rates = pd.DataFrame(index=ages_fit, columns=forecast_years)
+for i, year in enumerate(forecast_years):
+    RH_rates[year] = expit(ax_rh + kt_forecast_rh[i])
+
+RH55 = pd.DataFrame(index=ages_fit)
+RH55['qx'] = RH_rates.loc[:, forecast_years[:len(ages_fit)]].values.diagonal()
+RH55['px'] = 1 - RH55['qx']
+
+# 10. Save results
+CBD55.to_csv("CBD_fitted_US_55to65.csv")
+RH55.to_csv("RH_fitted_US_55to65.csv")
 
