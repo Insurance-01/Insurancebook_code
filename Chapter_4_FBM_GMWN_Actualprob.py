@@ -1,81 +1,101 @@
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
-from math import factorial, exp
+from scipy.optimize import root_scalar
 
-np.random.seed(1)
+# Load interest rates
+rate_df = pd.read_csv("C:/Users/admin/Desktop/usa interest rate yearly.csv")
+r = rate_df.iloc[:50, 2].values.reshape(-1, 1)
 
-def present_value(cash_flows, time_ids, interest_rate):
-    return np.sum(cash_flows / (1 + interest_rate) ** np.array(time_ids))
+# Value function part 1 (value1)
+def value1(d, grate):
+    mortality = pd.read_csv("C:/Users/admin/Desktop/shakti//Users/shaktisingh/Desktop/Paper 4 literature, codes and data/new mortality rates of usa.csv")
+    s0 = 100
+    qx = mortality.iloc[:599, 1].values
+    px = mortality.iloc[:599, 2].values
+    x = age = 1  # use x=1 for age 65
 
-def GMWB(delta, H, T, prob_file):
-    lambda_ = 1.25
-    r = 0.03
-    alpha = 0.005
-    gamma = 0.01
-    sigma_j = 0.1
-    m = np.exp(alpha + gamma**2 / 2) - 1
-    S0 = 100
-    w0 = S0
-    g = w0 / T
-    x = 55
-    simulations = 5000
+    l = 599 - x
+    tpx = np.cumprod(px[x:])
+    tdeferredqx = np.zeros(l)
+    tdeferredqx[0] = qx[x]
+    tdeferredqx[1:] = tpx[:-1] * qx[x+1:]
 
-    prob = pd.read_csv(prob_file)
-    qx = prob.iloc[0:(110 - x), 1].values
-    px = prob.iloc[0:(110 - x), 2].values
-    tpx = np.ones(len(px) + 1)
-    tpx[1:] = px
-    tpx0 = np.cumprod(tpx)
+    A = np.array([
+        [0.9001, 0.0241, 0.0192, 0.0059, 0.0056, 0.0047],
+        [0.3069, 0.3153, 0.1570, 0.0455, 0.0428, 0.0219],
+        [0.1625, 0.1334, 0.3596, 0.1050, 0.0605, 0.0294],
+        [0.0719, 0.0469, 0.2822, 0.2310, 0.1319, 0.0474],
+        [0.0702, 0.0577, 0.0875, 0.0905, 0.3298, 0.0586],
+        [0.0754, 0.0097, 0.0163, 0.0230, 0.0012, 0.7222]
+    ])
 
-    r_t = np.zeros((simulations, T + 1))
-    s_t = np.zeros((simulations, T + 2))
-    s_t[:, 0] = w0
+    grate = grate * (s0 / 100)
 
-    for i in range(1, T + 2):
-        for n in range(1, 101):
-            mu = (r - delta - m * lambda_) * i - 0.5 * sigma_j ** 2 * (i + i ** (2 * H)) + n * alpha
-            sigma = np.sqrt(sigma_j ** 2 * (i + i ** (2 * H)) + n * gamma ** 2)
-            term = norm.rvs(loc=mu, scale=sigma, size=simulations) * np.exp(-lambda_ * i) * (lambda_ * i) ** n / factorial(n)
-            r_t[:, i - 1] += term
+    def G(j):
+        if j <= 1:
+            return 2 + grate
+        elif j <= 2:
+            return 2 + grate
+        elif j <= 3:
+            return 3 + grate
+        elif j <= 4:
+            return 3 + grate
+        elif j <= 5:
+            return 4 + grate
+        else:
+            return 4 + grate
 
-    s_t[:, 1:] = w0 * np.exp(r_t)
+    LB = 0
+    for k in range(1, 24):
+        for j in range(6):
+            LB += G(j) * A[0, j] * s0 * np.exp(-r[2*k, 0] * k * 24)
+    return LB
 
-    fund = np.zeros((simulations, T + 1))
-    fund[:, 0] = w0
+# Value function part 2 (value2)
+def value2(d, grate, u):
+    prob = pd.read_csv("C:/Users/admin/Desktop/shakti/new mortality rates of usa.csv")
+    s0 = 100
+    qx = prob.iloc[1:23, 1].values
+    px = prob.iloc[1:23, 2].values
+    x = age = 1  # age 65
 
-    for i in range(T):
-        fund[:, i] *= (1 - delta)
-        fund[:, i + 1] = fund[:, i] * (s_t[:, i + 1] / s_t[:, i]) - g
+    l = 23 - x
+    tpx = np.cumprod(px[x:])
+    tdeferredqx = np.zeros(l)
+    tdeferredqx[0] = qx[x]
+    tdeferredqx[1:] = tpx[:-1] * qx[x+1:]
 
-    fund = np.where(fund < 0, 0, fund)
-    expected_value = np.mean(fund, axis=0)
+    A = np.array([
+        [0.9001, 0.0241, 0.0192, 0.0059, 0.0056, 0.0047],
+        [0.3069, 0.3153, 0.1570, 0.0455, 0.0428, 0.0219],
+        [0.1625, 0.1334, 0.3596, 0.1050, 0.0605, 0.0294],
+        [0.0719, 0.0469, 0.2822, 0.2310, 0.1319, 0.0474],
+        [0.0702, 0.0577, 0.0875, 0.0905, 0.3298, 0.0586],
+        [0.0754, 0.0097, 0.0163, 0.0230, 0.0012, 0.7222]
+    ])
 
-    times = np.arange(1, T + 1)
-    db = expected_value[1:T + 1] * qx[:T] * tpx0[:T]
-    guaranteed_annuity = tpx0[1:T + 1] * g
+    grate = grate * (s0 / 100)
 
-    PV1 = present_value(db, times, r)
-    PV2 = present_value(guaranteed_annuity, times, r)
-    lb = tpx0[T] * expected_value[T]
-    PV = PV1 + PV2 + lb
+    DB = 0
+    for j in range(1, 24):
+        DB += s0 * np.exp((u - d / 10000) * 24 * j) * tdeferredqx[j - 1]
+    return DB
 
-    return PV
+# Total value function
+def value(d, grate, u):
+    return value1(d, grate) + value2(d, grate, u)
+#Unit root finding 
+grate_values = np.arange(1, 1.4, 0.001)
+u = 0.0008
+root65 = []
 
-# Input parameters
-deltas = np.arange(0.010, 0.021, 0.001)
-Hs = [0.6, 0.7, 0.8]
-prob_file = "/mnt/data/US_55to65_actual.csv"
+for g in grate_values:
+    v0 = value(0, g, u)
+    v1 = value(1000, g, u)
+    if v0 > 100 and v1 < 100:
+        result = root_scalar(lambda x: value(x, g, u) - 100, bracket=[0, 1000])
+        if result.converged:
+            root65.append((g, result.root))
 
-X_T10 = np.zeros((len(Hs), len(deltas)))
-X_T15 = np.zeros((len(Hs), len(deltas)))
-
-for i, H in enumerate(Hs):
-    for j, delta in enumerate(deltas):
-        X_T10[i, j] = GMWB(delta, H, T=10, prob_file=prob_file)
-        X_T15[i, j] = GMWB(delta, H, T=15, prob_file=prob_file)
-
-# Save to CSV
-pd.DataFrame(X_T10).to_csv("/mnt/data/GMWB_EPV_actualprob_T10.csv", index=False)
-pd.DataFrame(X_T15).to_csv("/mnt/data/GMWB_EPV_actualprob_T15.csv", index=False)
-
+root65 = np.array(root65)
+print(root65)
